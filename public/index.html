@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QUANT HUNTER — Twitter Sentiment</title>
+<style>
+  :root {
+    --bg: #0a0e1a;
+    --surface: #111827;
+    --border: #1e2d40;
+    --accent: #00d4ff;
+    --green: #00e676;
+    --red: #ff1744;
+    --yellow: #ffd600;
+    --text: #e2e8f0;
+    --muted: #64748b;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; }
+
+  header {
+    background: linear-gradient(135deg, #0a0e1a 0%, #0f172a 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 20px 32px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  header .logo { font-size: 22px; font-weight: 800; letter-spacing: 2px; color: var(--accent); }
+  header .sub { font-size: 12px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; }
+  header .live-dot {
+    width: 8px; height: 8px; border-radius: 50%; background: var(--green);
+    box-shadow: 0 0 8px var(--green); animation: pulse 2s infinite;
+    margin-left: auto;
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
+
+  main { max-width: 1100px; margin: 0 auto; padding: 32px 16px; }
+
+  .search-bar {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px 24px;
+    display: flex;
+    gap: 12px;
+    margin-bottom: 28px;
+    flex-wrap: wrap;
+  }
+  .search-bar input {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 16px;
+    color: var(--text);
+    font-size: 16px;
+    min-width: 160px;
+    outline: none;
+    transition: border-color .2s;
+  }
+  .search-bar input:focus { border-color: var(--accent); }
+  .search-bar select {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 16px;
+    color: var(--text);
+    font-size: 14px;
+    cursor: pointer;
+    outline: none;
+  }
+  .btn {
+    padding: 12px 28px;
+    border-radius: 8px;
+    border: none;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all .2s;
+    letter-spacing: .5px;
+  }
+  .btn-primary { background: var(--accent); color: #000; }
+  .btn-primary:hover { background: #00b8d9; transform: translateY(-1px); }
+  .btn-secondary { background: var(--border); color: var(--text); }
+  .btn-secondary:hover { background: #243447; }
+  .btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+
+  .sentiment-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px;
+    margin-bottom: 24px;
+    display: none;
+  }
+  .sentiment-card.visible { display: block; }
+  .sentiment-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .sentiment-title { font-size: 18px; font-weight: 700; color: var(--accent); }
+  .sentiment-badge {
+    padding: 6px 18px;
+    border-radius: 20px;
+    font-size: 14px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .badge-bullish { background: rgba(0,230,118,.15); color: var(--green); border: 1px solid var(--green); }
+  .badge-bearish { background: rgba(255,23,68,.15); color: var(--red); border: 1px solid var(--red); }
+  .badge-neutral { background: rgba(255,214,0,.15); color: var(--yellow); border: 1px solid var(--yellow); }
+
+  .stats-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+  .stat-box {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+    text-align: center;
+  }
+  .stat-box .val { font-size: 28px; font-weight: 800; }
+  .stat-box .lbl { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; margin-top: 4px; }
+  .val-green { color: var(--green); }
+  .val-red { color: var(--red); }
+  .val-blue { color: var(--accent); }
+
+  .score-bar-wrap { margin-bottom: 8px; }
+  .score-bar-track {
+    height: 8px; border-radius: 4px; background: var(--border);
+    overflow: hidden; margin-top: 8px;
+  }
+  .score-bar-fill {
+    height: 100%; border-radius: 4px;
+    transition: width .6s ease;
+  }
+
+  .tweets-title { font-size: 15px; font-weight: 700; color: var(--muted); margin-bottom: 16px; text-transform: uppercase; letter-spacing: 1px; }
+  .tweets-list { display: flex; flex-direction: column; gap: 12px; }
+  .tweet-card {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    transition: border-color .2s;
+  }
+  .tweet-card:hover { border-color: var(--accent); }
+  .tweet-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; flex-wrap: wrap; gap: 8px; }
+  .tweet-author { display: flex; align-items: center; gap: 8px; }
+  .tweet-author .avatar {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent), #6366f1);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 700; color: #000; flex-shrink: 0;
+  }
+  .tweet-author .name { font-size: 14px; font-weight: 600; }
+  .tweet-author .followers { font-size: 11px; color: var(--muted); }
+  .tweet-sentiment {
+    font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 12px;
+    text-transform: uppercase; letter-spacing: .5px;
+  }
+  .s-bullish { background: rgba(0,230,118,.12); color: var(--green); }
+  .s-bearish { background: rgba(255,23,68,.12); color: var(--red); }
+  .s-neutral { background: rgba(100,116,139,.15); color: var(--muted); }
+  .tweet-text { font-size: 14px; line-height: 1.6; color: #cbd5e1; margin-bottom: 10px; }
+  .tweet-meta { display: flex; gap: 16px; font-size: 12px; color: var(--muted); }
+  .tweet-meta span { display: flex; align-items: center; gap: 4px; }
+
+  .trending-section { margin-top: 32px; }
+  .section-title {
+    font-size: 16px; font-weight: 800; color: var(--accent); text-transform: uppercase;
+    letter-spacing: 1.5px; margin-bottom: 16px; display: flex; align-items: center; gap: 8px;
+  }
+  .trending-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
+  .trending-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    cursor: pointer;
+    transition: all .2s;
+    text-align: center;
+  }
+  .trending-card:hover { border-color: var(--accent); transform: translateY(-2px); background: #1a2535; }
+  .trending-card .sym { font-size: 18px; font-weight: 800; color: var(--accent); }
+  .trending-card .mentions { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .trending-card .engagement { font-size: 12px; color: var(--text); margin-top: 2px; }
+
+  .loader {
+    display: none;
+    text-align: center;
+    padding: 40px;
+    color: var(--muted);
+  }
+  .loader.visible { display: block; }
+  .spinner {
+    width: 32px; height: 32px; border: 3px solid var(--border);
+    border-top-color: var(--accent); border-radius: 50%;
+    animation: spin .8s linear infinite; margin: 0 auto 12px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .error-msg {
+    background: rgba(255,23,68,.1);
+    border: 1px solid rgba(255,23,68,.3);
+    border-radius: 8px;
+    padding: 14px 20px;
+    color: var(--red);
+    font-size: 14px;
+    display: none;
+    margin-bottom: 20px;
+  }
+  .error-msg.visible { display: block; }
+
+  @media (max-width: 600px) {
+    header { padding: 16px; }
+    .search-bar { padding: 16px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="logo">⚡ QUANT HUNTER</div>
+    <div class="sub">Twitter/X Sentiment Engine</div>
+  </div>
+  <div class="live-dot" title="Proxy online"></div>
+</header>
+
+<main>
+
+  <!-- Search -->
+  <div class="search-bar">
+    <input type="text" id="queryInput" placeholder="Ex: BTC, ETH, bitcoin..." value="BTC">
+    <select id="maxSelect">
+      <option value="10">10 tweets</option>
+      <option value="15" selected>15 tweets</option>
+      <option value="25">25 tweets</option>
+      <option value="50">50 tweets</option>
+    </select>
+    <button class="btn btn-primary" onclick="search()">Buscar</button>
+    <button class="btn btn-secondary" onclick="loadTrending()">📈 Trending</button>
+  </div>
+
+  <!-- Error -->
+  <div class="error-msg" id="errorMsg"></div>
+
+  <!-- Loader -->
+  <div class="loader" id="loader">
+    <div class="spinner"></div>
+    Buscando tweets em tempo real...
+  </div>
+
+  <!-- Sentiment Result -->
+  <div class="sentiment-card" id="sentimentCard">
+    <div class="sentiment-header">
+      <div class="sentiment-title" id="resultTitle">—</div>
+      <div class="sentiment-badge" id="sentimentBadge">—</div>
+    </div>
+
+    <div class="stats-row">
+      <div class="stat-box">
+        <div class="val val-blue" id="statTotal">—</div>
+        <div class="lbl">Tweets</div>
+      </div>
+      <div class="stat-box">
+        <div class="val" id="statScore">—</div>
+        <div class="lbl">Score</div>
+      </div>
+      <div class="stat-box">
+        <div class="val val-green" id="statBull">—</div>
+        <div class="lbl">Bullish</div>
+      </div>
+      <div class="stat-box">
+        <div class="val val-red" id="statBear">—</div>
+        <div class="lbl">Bearish</div>
+      </div>
+    </div>
+
+    <div class="score-bar-wrap">
+      <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted)">
+        <span>🔴 Bearish</span><span>🟢 Bullish</span>
+      </div>
+      <div class="score-bar-track">
+        <div class="score-bar-fill" id="scoreBarFill" style="width:50%;background:var(--yellow)"></div>
+      </div>
+    </div>
+
+    <br>
+    <div class="tweets-title">Tweets</div>
+    <div class="tweets-list" id="tweetsList"></div>
+  </div>
+
+  <!-- Trending -->
+  <div class="trending-section" id="trendingSection" style="display:none">
+    <div class="section-title">📈 Trending Cripto</div>
+    <div class="trending-grid" id="trendingGrid"></div>
+  </div>
+
+</main>
+
+<script>
+const API = 'http://89.116.186.241:3001';
+
+function showError(msg) {
+  const el = document.getElementById('errorMsg');
+  el.textContent = msg;
+  el.classList.add('visible');
+}
+function hideError() { document.getElementById('errorMsg').classList.remove('visible'); }
+function showLoader() { document.getElementById('loader').classList.add('visible'); }
+function hideLoader() { document.getElementById('loader').classList.remove('visible'); }
+
+async function search() {
+  const query = document.getElementById('queryInput').value.trim();
+  const max = document.getElementById('maxSelect').value;
+  if (!query) return;
+
+  hideError();
+  showLoader();
+  document.getElementById('sentimentCard').classList.remove('visible');
+  document.getElementById('trendingSection').style.display = 'none';
+
+  try {
+    const res = await fetch(`${API}/api/twitter/search?query=${encodeURIComponent(query)}&max=${max}`);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    renderSentiment(query, data);
+  } catch(e) {
+    showError('Erro: ' + e.message);
+  } finally {
+    hideLoader();
+  }
+}
+
+function renderSentiment(query, data) {
+  document.getElementById('resultTitle').textContent = `#${query.toUpperCase()} — ${data.total} tweets`;
+  document.getElementById('statTotal').textContent = data.total;
+  document.getElementById('statScore').textContent = (data.sentimentScore > 0 ? '+' : '') + data.sentimentScore;
+  document.getElementById('statBull').textContent = data.bullishCount;
+  document.getElementById('statBear').textContent = data.bearishCount;
+
+  const score = document.getElementById('statScore');
+  score.className = 'val ' + (data.sentimentScore > 0 ? 'val-green' : data.sentimentScore < 0 ? 'val-red' : 'val-blue');
+
+  const badge = document.getElementById('sentimentBadge');
+  const s = data.overallSentiment;
+  badge.textContent = s === 'bullish' ? '🟢 Bullish' : s === 'bearish' ? '🔴 Bearish' : '🟡 Neutro';
+  badge.className = 'sentiment-badge ' + (s === 'bullish' ? 'badge-bullish' : s === 'bearish' ? 'badge-bearish' : 'badge-neutral');
+
+  // Score bar: 0-100 onde 50 = neutro
+  const pct = Math.max(0, Math.min(100, 50 + data.sentimentScore / 2));
+  const bar = document.getElementById('scoreBarFill');
+  bar.style.width = pct + '%';
+  bar.style.background = pct > 55 ? 'var(--green)' : pct < 45 ? 'var(--red)' : 'var(--yellow)';
+
+  const list = document.getElementById('tweetsList');
+  list.innerHTML = (data.tweets || []).map(t => `
+    <div class="tweet-card">
+      <div class="tweet-top">
+        <div class="tweet-author">
+          <div class="avatar">${(t.author || '?')[0].toUpperCase()}</div>
+          <div>
+            <div class="name">@${t.author || 'unknown'}</div>
+            <div class="followers">${fmtNum(t.followers)} seguidores</div>
+          </div>
+        </div>
+        <span class="tweet-sentiment s-${t.sentiment}">${t.sentiment}</span>
+      </div>
+      <div class="tweet-text">${escHtml(t.text)}</div>
+      <div class="tweet-meta">
+        <span>❤️ ${fmtNum(t.likes)}</span>
+        <span>🔁 ${fmtNum(t.retweets)}</span>
+        <span>⏱ ${timeAgo(t.created_at)}</span>
+      </div>
+    </div>
+  `).join('');
+
+  document.getElementById('sentimentCard').classList.add('visible');
+}
+
+async function loadTrending() {
+  hideError();
+  showLoader();
+  document.getElementById('sentimentCard').classList.remove('visible');
+  document.getElementById('trendingSection').style.display = 'none';
+
+  try {
+    const res = await fetch(`${API}/api/twitter/trending`);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    renderTrending(data);
+  } catch(e) {
+    showError('Erro: ' + e.message);
+  } finally {
+    hideLoader();
+  }
+}
+
+function renderTrending(data) {
+  const grid = document.getElementById('trendingGrid');
+  grid.innerHTML = (data.trending || []).map(t => `
+    <div class="trending-card" onclick="searchSymbol('${t.symbol}')">
+      <div class="sym">$${t.symbol}</div>
+      <div class="mentions">${t.mentions} menções</div>
+      <div class="engagement">🔥 ${fmtNum(t.engagement)} eng</div>
+    </div>
+  `).join('');
+  document.getElementById('trendingSection').style.display = 'block';
+}
+
+function searchSymbol(sym) {
+  document.getElementById('queryInput').value = sym;
+  search();
+}
+
+function fmtNum(n) {
+  if (!n) return '0';
+  if (n >= 1000000) return (n/1000000).toFixed(1) + 'M';
+  if (n >= 1000) return (n/1000).toFixed(1) + 'K';
+  return n.toString();
+}
+
+function timeAgo(iso) {
+  if (!iso) return '';
+  const diff = Math.floor((Date.now() - new Date(iso)) / 1000);
+  if (diff < 60) return diff + 's atrás';
+  if (diff < 3600) return Math.floor(diff/60) + 'min atrás';
+  if (diff < 86400) return Math.floor(diff/3600) + 'h atrás';
+  return Math.floor(diff/86400) + 'd atrás';
+}
+
+function escHtml(s) {
+  return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// Busca ao apertar Enter
+document.getElementById('queryInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') search();
+});
+
+// Busca inicial
+search();
+</script>
+</body>
+</html>
