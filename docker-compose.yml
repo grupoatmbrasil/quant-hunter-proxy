@@ -1,0 +1,25 @@
+version: '3.9'
+
+services:
+  quant-hunter-proxy:
+    build: .
+    container_name: quant-hunter-proxy
+    restart: always
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      # ── Cole seu Bearer Token aqui ──
+      - TWITTER_BEARER_TOKEN=${TWITTER_BEARER_TOKEN}
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
