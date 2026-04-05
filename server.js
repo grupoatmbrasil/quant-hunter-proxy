@@ -41,6 +41,12 @@ if (!BEARER) {
   process.exit(1);
 }
 
+// ── ANTHROPIC API KEY ──
+const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+if (!ANTHROPIC_KEY) {
+  console.warn('⚠️  ANTHROPIC_API_KEY não definido — endpoint /api/claude desativado');
+}
+
 const twitterHeaders = {
   'Authorization': `Bearer ${BEARER}`,
   'Content-Type': 'application/json'
@@ -227,13 +233,59 @@ app.post('/api/twitter/batch', async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════
+// ENDPOINT 4 — Proxy Claude API (evita CORS + esconde chave)
+// POST /api/claude
+// body: { model, max_tokens, messages }
+// ══════════════════════════════════════════════════
+app.post('/api/claude', async (req, res) => {
+  if (!ANTHROPIC_KEY) {
+    return res.status(503).json({ error: 'ANTHROPIC_API_KEY não configurada no servidor.' });
+  }
+
+  try {
+    const { model, max_tokens, messages } = req.body;
+
+    if (!messages || !Array.isArray(messages)) {
+      return res.status(400).json({ error: 'Campo messages obrigatório.' });
+    }
+
+    const { data } = await axios.post(
+      'https://api.anthropic.com/v1/messages',
+      {
+        model: model || 'claude-sonnet-4-20250514',
+        max_tokens: max_tokens || 5000,
+        messages
+      },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': ANTHROPIC_KEY,
+          'anthropic-version': '2023-06-01'
+        },
+        timeout: 120000 // 2 min — respostas longas
+      }
+    );
+
+    res.json(data);
+
+  } catch (err) {
+    const status  = err.response?.status || 500;
+    const message = err.response?.data?.error?.message || err.message;
+    console.error('Claude API error:', status, message);
+    res.status(status).json({ error: message, status });
+  }
+});
+
+// ══════════════════════════════════════════════════
 // HEALTH CHECK
 // ══════════════════════════════════════════════════
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
-    service: 'QUANT HUNTER Twitter Proxy',
-    version: '2.0',
+    service: 'QUANT HUNTER Proxy',
+    version: '2.1',
+    twitter: BEARER ? '✓' : '❌',
+    claude: ANTHROPIC_KEY ? '✓' : '❌',
     time: new Date().toISOString()
   });
 });
