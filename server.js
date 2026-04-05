@@ -54,7 +54,7 @@ app.get('/api/twitter/search', async (req, res) => {
     if (!query) return res.status(400).json({ error: 'query obrigatório' });
 
     const searchQuery = encodeURIComponent(
-      `(${query} OR $${query.toUpperCase()}) lang:pt OR lang:en -is:retweet`
+      `(${query} OR $${query.toUpperCase()}) (lang:pt OR lang:en) -is:retweet`
     );
 
     const url = `https://api.twitter.com/2/tweets/search/recent` +
