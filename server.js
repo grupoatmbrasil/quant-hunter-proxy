@@ -277,6 +277,127 @@ app.post('/api/claude', async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════
+// ARKHAM INTELLIGENCE API
+// ══════════════════════════════════════════════════
+const ARKHAM_KEY = process.env.ARKHAM_API_KEY;
+const ARKHAM     = 'https://intel.arkm.com/api';
+
+const arkhamHeaders = () => ({
+  'API-Key': ARKHAM_KEY,
+  'Content-Type': 'application/json'
+});
+
+// Middleware para checar chave Arkham
+const requireArkham = (req, res, next) => {
+  if (!ARKHAM_KEY) return res.status(503).json({ error: 'ARKHAM_API_KEY não configurada.' });
+  next();
+};
+
+// ── ENDPOINT A1 — Inteligência de carteira
+// GET /api/arkham/address/:address
+// Retorna: entidade real, labels, chain, cluster
+// ══════════════════════════════════════════════════
+app.get('/api/arkham/address/:address', requireArkham, async (req, res) => {
+  try {
+    const { address } = req.params;
+    const { chain = 'ethereum' } = req.query;
+
+    const { data } = await axios.get(`${ARKHAM}/intelligence/address/${address}`, {
+      headers: arkhamHeaders(),
+      params: { chain }
+    });
+
+    res.json(data);
+  } catch (err) {
+    res.status(err.response?.status || 500).json({ error: err.response?.data || err.message });
+  }
+});
+
+// ── ENDPOINT A2 — Balanço de uma carteira
+// GET /api/arkham/balance/:address
+// Retorna: tokens, valores USD por chain
+// ══════════════════════════════════════════════════
+app.get('/api/arkham/balance/:address', requireArkham, async (req, res) => {
+  try {
+    const { address } = req.params;
+    const { data } = await axios.get(`${ARKHAM}/balances/address/${address}`, {
+      headers: arkhamHeaders()
+    });
+    res.json(data);
+  } catch (err) {
+    res.status(err.response?.status || 500).json({ error: err.response?.data || err.message });
+  }
+});
+
+// ── ENDPOINT A3 — Fluxo de capital (inflow/outflow)
+// GET /api/arkham/flow/:address?timeLast=1d
+// timeLast: 1h | 1d | 7d | 30d
+// ══════════════════════════════════════════════════
+app.get('/api/arkham/flow/:address', requireArkham, async (req, res) => {
+  try {
+    const { address } = req.params;
+    const { timeLast = '1d' } = req.query;
+    const { data } = await axios.get(`${ARKHAM}/flow/address/${address}`, {
+      headers: arkhamHeaders(),
+      params: { timeLast }
+    });
+    res.json(data);
+  } catch (err) {
+    res.status(err.response?.status || 500).json({ error: err.response?.data || err.message });
+  }
+});
+
+// ── ENDPOINT A4 — Inteligência de entidade
+// GET /api/arkham/entity/:entity
+// entity: "binance", "coinbase", "alameda-research" etc.
+// ══════════════════════════════════════════════════
+app.get('/api/arkham/entity/:entity', requireArkham, async (req, res) => {
+  try {
+    const { entity } = req.params;
+    const { data } = await axios.get(`${ARKHAM}/intelligence/entity/${entity}`, {
+      headers: arkhamHeaders()
+    });
+    res.json(data);
+  } catch (err) {
+    res.status(err.response?.status || 500).json({ error: err.response?.data || err.message });
+  }
+});
+
+// ── ENDPOINT A5 — Busca (wallet, entidade, token)
+// GET /api/arkham/search?q=binance
+// ══════════════════════════════════════════════════
+app.get('/api/arkham/search', requireArkham, async (req, res) => {
+  try {
+    const { q } = req.query;
+    if (!q) return res.status(400).json({ error: 'Parâmetro q obrigatório' });
+    const { data } = await axios.get(`${ARKHAM}/intelligence/search`, {
+      headers: arkhamHeaders(),
+      params: { q }
+    });
+    res.json(data);
+  } catch (err) {
+    res.status(err.response?.status || 500).json({ error: err.response?.data || err.message });
+  }
+});
+
+// ── ENDPOINT A6 — Contrapartes (com quem a whale mais negocia)
+// GET /api/arkham/counterparties/:address?timeLast=7d&limit=10
+// ══════════════════════════════════════════════════
+app.get('/api/arkham/counterparties/:address', requireArkham, async (req, res) => {
+  try {
+    const { address } = req.params;
+    const { timeLast = '7d', limit = 10 } = req.query;
+    const { data } = await axios.get(`${ARKHAM}/counterparties/address/${address}`, {
+      headers: arkhamHeaders(),
+      params: { timeLast, limit }
+    });
+    res.json(data);
+  } catch (err) {
+    res.status(err.response?.status || 500).json({ error: err.response?.data || err.message });
+  }
+});
+
+// ══════════════════════════════════════════════════
 // BINANCE — base URL pública (sem auth)
 // ══════════════════════════════════════════════════
 const BINANCE = 'https://api.binance.com/api/v3';
@@ -433,10 +554,11 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     service: 'QUANT HUNTER Proxy',
-    version: '2.2',
+    version: '2.3',
     twitter: BEARER ? '✓' : '❌',
     claude: ANTHROPIC_KEY ? '✓' : '❌',
     binance: '✓',
+    arkham: ARKHAM_KEY ? '✓' : '❌',
     time: new Date().toISOString()
   });
 });
