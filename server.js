@@ -277,15 +277,166 @@ app.post('/api/claude', async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════
+// BINANCE — base URL pública (sem auth)
+// ══════════════════════════════════════════════════
+const BINANCE = 'https://api.binance.com/api/v3';
+
+// ── ENDPOINT 5 — Ticker 24h de um ou vários símbolos
+// GET /api/binance/ticker?symbol=BTCUSDT
+// GET /api/binance/ticker  (retorna top movers)
+// ══════════════════════════════════════════════════
+app.get('/api/binance/ticker', async (req, res) => {
+  try {
+    const { symbol } = req.query;
+
+    if (symbol) {
+      const { data } = await axios.get(`${BINANCE}/ticker/24hr`, {
+        params: { symbol: symbol.toUpperCase() }
+      });
+      return res.json({
+        symbol: data.symbol,
+        price: parseFloat(data.lastPrice),
+        change24h: parseFloat(data.priceChangePercent),
+        high24h: parseFloat(data.highPrice),
+        low24h: parseFloat(data.lowPrice),
+        volume24h: parseFloat(data.volume),
+        quoteVolume: parseFloat(data.quoteVolume),
+        trades: data.count
+      });
+    }
+
+    // Sem symbol → top 20 gainers e losers em USDT
+    const { data } = await axios.get(`${BINANCE}/ticker/24hr`);
+    const usdt = data.filter(t => t.symbol.endsWith('USDT'));
+    const sorted = usdt.sort((a, b) => parseFloat(b.priceChangePercent) - parseFloat(a.priceChangePercent));
+    const gainers = sorted.slice(0, 10).map(t => ({
+      symbol: t.symbol, price: parseFloat(t.lastPrice),
+      change24h: parseFloat(t.priceChangePercent), quoteVolume: parseFloat(t.quoteVolume)
+    }));
+    const losers = sorted.slice(-10).reverse().map(t => ({
+      symbol: t.symbol, price: parseFloat(t.lastPrice),
+      change24h: parseFloat(t.priceChangePercent), quoteVolume: parseFloat(t.quoteVolume)
+    }));
+    res.json({ gainers, losers, generatedAt: new Date().toISOString() });
+
+  } catch (err) {
+    res.status(err.response?.status || 500).json({ error: err.response?.data?.msg || err.message });
+  }
+});
+
+// ── ENDPOINT 6 — Klines (candles)
+// GET /api/binance/klines?symbol=BTCUSDT&interval=1h&limit=100
+// intervals: 1m 5m 15m 1h 4h 1d 1w
+// ══════════════════════════════════════════════════
+app.get('/api/binance/klines', async (req, res) => {
+  try {
+    const { symbol, interval = '1h', limit = 100 } = req.query;
+    if (!symbol) return res.status(400).json({ error: 'symbol obrigatório' });
+
+    const { data } = await axios.get(`${BINANCE}/klines`, {
+      params: {
+        symbol: symbol.toUpperCase(),
+        interval,
+        limit: Math.min(Number(limit), 1000)
+      }
+    });
+
+    const candles = data.map(k => ({
+      openTime: k[0],
+      open:  parseFloat(k[1]),
+      high:  parseFloat(k[2]),
+      low:   parseFloat(k[3]),
+      close: parseFloat(k[4]),
+      volume: parseFloat(k[5]),
+      closeTime: k[6],
+      trades: k[8]
+    }));
+
+    res.json({ symbol: symbol.toUpperCase(), interval, candles });
+
+  } catch (err) {
+    res.status(err.response?.status || 500).json({ error: err.response?.data?.msg || err.message });
+  }
+});
+
+// ── ENDPOINT 7 — Order Book (profundidade)
+// GET /api/binance/orderbook?symbol=BTCUSDT&limit=20
+// ══════════════════════════════════════════════════
+app.get('/api/binance/orderbook', async (req, res) => {
+  try {
+    const { symbol, limit = 20 } = req.query;
+    if (!symbol) return res.status(400).json({ error: 'symbol obrigatório' });
+
+    const { data } = await axios.get(`${BINANCE}/depth`, {
+      params: { symbol: symbol.toUpperCase(), limit: Math.min(Number(limit), 100) }
+    });
+
+    const parse = arr => arr.map(([price, qty]) => ({
+      price: parseFloat(price), qty: parseFloat(qty)
+    }));
+
+    const bids = parse(data.bids);
+    const asks = parse(data.asks);
+
+    const totalBidVol = bids.reduce((s, b) => s + b.qty, 0);
+    const totalAskVol = asks.reduce((s, a) => s + a.qty, 0);
+    const pressure = totalBidVol + totalAskVol > 0
+      ? Math.round((totalBidVol / (totalBidVol + totalAskVol)) * 100)
+      : 50;
+
+    res.json({
+      symbol: symbol.toUpperCase(),
+      bids, asks,
+      bidVolume: totalBidVol,
+      askVolume: totalAskVol,
+      buyPressure: pressure, // % de compra (>50 = mais compradores)
+      lastUpdateId: data.lastUpdateId
+    });
+
+  } catch (err) {
+    res.status(err.response?.status || 500).json({ error: err.response?.data?.msg || err.message });
+  }
+});
+
+// ── ENDPOINT 8 — Preço spot simples (múltiplos símbolos)
+// GET /api/binance/prices?symbols=BTC,ETH,SOL,BNB
+// ══════════════════════════════════════════════════
+app.get('/api/binance/prices', async (req, res) => {
+  try {
+    const { symbols } = req.query;
+
+    if (symbols) {
+      const syms = symbols.split(',').map(s => `"${s.trim().toUpperCase()}USDT"`);
+      const { data } = await axios.get(`${BINANCE}/ticker/price`, {
+        params: { symbols: `[${syms.join(',')}]` }
+      });
+      const result = {};
+      data.forEach(t => { result[t.symbol] = parseFloat(t.price); });
+      return res.json(result);
+    }
+
+    const { data } = await axios.get(`${BINANCE}/ticker/price`);
+    const result = {};
+    data.filter(t => t.symbol.endsWith('USDT'))
+        .forEach(t => { result[t.symbol] = parseFloat(t.price); });
+    res.json(result);
+
+  } catch (err) {
+    res.status(err.response?.status || 500).json({ error: err.response?.data?.msg || err.message });
+  }
+});
+
+// ══════════════════════════════════════════════════
 // HEALTH CHECK
 // ══════════════════════════════════════════════════
 app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     service: 'QUANT HUNTER Proxy',
-    version: '2.1',
+    version: '2.2',
     twitter: BEARER ? '✓' : '❌',
     claude: ANTHROPIC_KEY ? '✓' : '❌',
+    binance: '✓',
     time: new Date().toISOString()
   });
 });
