@@ -12,6 +12,7 @@ services:
       - PORT=3001
       # ── Cole seu Bearer Token aqui ──
       - TWITTER_BEARER_TOKEN=${TWITTER_BEARER_TOKEN}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
       interval: 30s
