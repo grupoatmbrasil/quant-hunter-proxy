@@ -59,7 +59,7 @@ app.get('/api/twitter/search', async (req, res) => {
 
     const url = `https://api.twitter.com/2/tweets/search/recent` +
       `?query=${searchQuery}` +
-      `&max_results=${Math.min(max, 100)}` +
+      `&max_results=${Math.min(Math.max(Number(max), 10), 100)}` +
       `&tweet.fields=created_at,public_metrics,author_id,text` +
       `&expansions=author_id` +
       `&user.fields=name,username,verified,public_metrics`;
