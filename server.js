@@ -55,6 +55,7 @@ const twitterHeaders = {
 // ══════════════════════════════════════════════════
 // ENDPOINT 1 — Busca tweets sobre um ativo
 // GET /api/twitter/search?query=bitcoin&max=20
+// Nota: requer plano Basic+ do Twitter API v2
 // ══════════════════════════════════════════════════
 app.get('/api/twitter/search', async (req, res) => {
   try {
@@ -74,7 +75,6 @@ app.get('/api/twitter/search', async (req, res) => {
 
     const { data } = await axios.get(url, { headers: twitterHeaders });
 
-    // Processa e pontua sentimento básico
     const bullishWords = ['pump','moon','buy','bullish','alta','subindo','rompeu','breakout','acumula','strong'];
     const bearishWords = ['dump','crash','sell','bearish','baixa','caindo','cuidado','short','fuga','weak'];
 
@@ -85,10 +85,7 @@ app.get('/api/twitter/search', async (req, res) => {
       const sentiment = bull > bear ? 'bullish' : bear > bull ? 'bearish' : 'neutral';
       const user = data.includes?.users?.find(u => u.id === t.author_id);
       return {
-        id: t.id,
-        text: t.text,
-        sentiment,
-        score: bull - bear,
+        id: t.id, text: t.text, sentiment, score: bull - bear,
         likes: t.public_metrics?.like_count || 0,
         retweets: t.public_metrics?.retweet_count || 0,
         author: user?.username || 'unknown',
@@ -98,29 +95,26 @@ app.get('/api/twitter/search', async (req, res) => {
       };
     });
 
-    // Agrega sentimento geral
     const totalBull = tweets.filter(t => t.sentiment === 'bullish').length;
     const totalBear = tweets.filter(t => t.sentiment === 'bearish').length;
     const overallSentiment = totalBull > totalBear ? 'bullish' : totalBear > totalBull ? 'bearish' : 'neutral';
     const sentimentScore = tweets.length ? Math.round(((totalBull - totalBear) / tweets.length) * 100) : 0;
 
     res.json({
-      query,
-      total: tweets.length,
-      overallSentiment,
-      sentimentScore, // -100 a +100
-      bullishCount: totalBull,
-      bearishCount: totalBear,
+      query, total: tweets.length, overallSentiment, sentimentScore,
+      bullishCount: totalBull, bearishCount: totalBear,
       tweets: tweets.sort((a, b) => (b.likes + b.retweets) - (a.likes + a.retweets))
     });
 
   } catch (err) {
     const status = err.response?.status || 500;
+    // 402 = plano insuficiente — retorna estrutura vazia sem quebrar o app
+    if (status === 402) {
+      return res.json({ query: req.query.query, total: 0, overallSentiment: 'neutral',
+        sentimentScore: 0, bullishCount: 0, bearishCount: 0, tweets: [], _unavailable: true });
+    }
     console.error('Twitter search error:', err.response?.data || err.message);
-    res.status(status).json({
-      error: err.response?.data?.detail || err.message,
-      status
-    });
+    res.status(status).json({ error: err.response?.data?.detail || err.message, status });
   }
 });
 
@@ -131,18 +125,10 @@ app.get('/api/twitter/search', async (req, res) => {
 app.get('/api/twitter/trending', async (req, res) => {
   try {
     const cryptoTerms = ['bitcoin','ethereum','crypto','altcoin','binance','defi','web3','blockchain'];
-    const query = encodeURIComponent(
-      `(${cryptoTerms.join(' OR ')}) lang:en -is:retweet`
-    );
-
-    const url = `https://api.twitter.com/2/tweets/search/recent` +
-      `?query=${query}` +
-      `&max_results=50` +
-      `&tweet.fields=created_at,public_metrics,text`;
-
+    const query = encodeURIComponent(`(${cryptoTerms.join(' OR ')}) lang:en -is:retweet`);
+    const url = `https://api.twitter.com/2/tweets/search/recent?query=${query}&max_results=50&tweet.fields=created_at,public_metrics,text`;
     const { data } = await axios.get(url, { headers: twitterHeaders });
 
-    // Extrai moedas mencionadas (cashtags)
     const coinMentions = {};
     (data.data || []).forEach(t => {
       const cashtags = t.text.match(/\$[A-Z]{2,8}/g) || [];
@@ -159,14 +145,15 @@ app.get('/api/twitter/trending', async (req, res) => {
       .sort((a, b) => b.engagement - a.engagement)
       .slice(0, 15);
 
-    res.json({
-      trending,
-      totalTweets: data.data?.length || 0,
-      generatedAt: new Date().toISOString()
-    });
+    res.json({ trending, totalTweets: data.data?.length || 0, generatedAt: new Date().toISOString() });
 
   } catch (err) {
-    res.status(err.response?.status || 500).json({ error: err.message });
+    const status = err.response?.status || 500;
+    // 402 = plano insuficiente — retorna trending vazio sem quebrar o app
+    if (status === 402) {
+      return res.json({ trending: [], totalTweets: 0, _unavailable: true, generatedAt: new Date().toISOString() });
+    }
+    res.status(status).json({ error: err.message });
   }
 });
 
@@ -325,17 +312,33 @@ app.get('/api/cmc/quotes', requireCMC, async (req, res) => {
   }
 });
 
-// ── CMC 3 — Trending (mais buscadas agora)
+// ── CMC 3 — Trending: moedas com maior variação de volume 24h
 // GET /api/cmc/trending?limit=10
+// Derivado do /listings (endpoint disponível no free)
 // ══════════════════════════════════════════════════
 app.get('/api/cmc/trending', requireCMC, async (req, res) => {
   try {
     const { limit = 10 } = req.query;
-    const { data } = await axios.get(`${CMC}/v1/cryptocurrency/trending/latest`, {
+    // Busca top 100 por volume e filtra os com maior variação de volume
+    const { data } = await axios.get(`${CMC}/v1/cryptocurrency/listings/latest`, {
       headers: cmcHeaders(),
-      params: { limit: Math.min(Number(limit), 20), convert: 'USD' }
+      params: { limit: 100, convert: 'USD', sort: 'volume_24h' }
     });
-    res.json(data);
+
+    const coins = (data.data || [])
+      .filter(c => c.quote?.USD?.volume_change_24h != null)
+      .sort((a, b) => Math.abs(b.quote.USD.volume_change_24h) - Math.abs(a.quote.USD.volume_change_24h))
+      .slice(0, Number(limit))
+      .map(c => ({
+        id: c.id, name: c.name, symbol: c.symbol,
+        price: c.quote.USD.price,
+        volume_24h: c.quote.USD.volume_24h,
+        volume_change_24h: c.quote.USD.volume_change_24h,
+        percent_change_24h: c.quote.USD.percent_change_24h,
+        market_cap: c.quote.USD.market_cap
+      }));
+
+    res.json({ data: coins, generatedAt: new Date().toISOString() });
   } catch (err) {
     res.status(err.response?.status || 500).json({ error: err.response?.data?.status?.error_message || err.message });
   }
@@ -387,17 +390,37 @@ app.get('/api/cmc/info', requireCMC, async (req, res) => {
   }
 });
 
-// ── CMC 7 — Gainers & Losers (trending por variação de preço)
-// GET /api/cmc/gainers?limit=10&percent_change_timeframe=24h
+// ── CMC 7 — Gainers & Losers calculado via /listings (free tier)
+// GET /api/cmc/gainers?limit=10&timeframe=24h
+// timeframe: 1h | 24h | 7d
 // ══════════════════════════════════════════════════
 app.get('/api/cmc/gainers', requireCMC, async (req, res) => {
   try {
-    const { limit = 10, percent_change_timeframe = '24h' } = req.query;
-    const { data } = await axios.get(`${CMC}/v1/cryptocurrency/trending/gainers-losers`, {
+    const { limit = 10, timeframe = '24h' } = req.query;
+    const { data } = await axios.get(`${CMC}/v1/cryptocurrency/listings/latest`, {
       headers: cmcHeaders(),
-      params: { limit: Math.min(Number(limit), 20), percent_change_timeframe, convert: 'USD' }
+      params: { limit: 200, convert: 'USD', sort: 'volume_24h', market_cap_min: 1000000 }
     });
-    res.json(data);
+
+    const field = timeframe === '1h' ? 'percent_change_1h'
+                : timeframe === '7d' ? 'percent_change_7d'
+                : 'percent_change_24h';
+
+    const coins = (data.data || [])
+      .filter(c => c.quote?.USD?.[field] != null)
+      .map(c => ({
+        id: c.id, name: c.name, symbol: c.symbol,
+        price: c.quote.USD.price,
+        change: c.quote.USD[field],
+        volume_24h: c.quote.USD.volume_24h,
+        market_cap: c.quote.USD.market_cap
+      }));
+
+    const sorted = [...coins].sort((a, b) => b.change - a.change);
+    const gainers = sorted.slice(0, Number(limit));
+    const losers  = sorted.slice(-Number(limit)).reverse();
+
+    res.json({ gainers, losers, timeframe, generatedAt: new Date().toISOString() });
   } catch (err) {
     res.status(err.response?.status || 500).json({ error: err.response?.data?.status?.error_message || err.message });
   }
@@ -407,11 +430,12 @@ app.get('/api/cmc/gainers', requireCMC, async (req, res) => {
 // ARKHAM INTELLIGENCE API
 // ══════════════════════════════════════════════════
 const ARKHAM_KEY = process.env.ARKHAM_API_KEY;
-const ARKHAM     = 'https://intel.arkm.com/api';
+const ARKHAM     = 'https://api.arkm.com';
 
 const arkhamHeaders = () => ({
   'API-Key': ARKHAM_KEY,
-  'Content-Type': 'application/json'
+  'Content-Type': 'application/json',
+  'Accept': 'application/json'
 });
 
 // Middleware para checar chave Arkham
