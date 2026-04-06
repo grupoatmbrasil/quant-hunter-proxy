@@ -277,6 +277,133 @@ app.post('/api/claude', async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════
+// COINMARKETCAP API
+// ══════════════════════════════════════════════════
+const CMC_KEY = process.env.CMC_API_KEY;
+const CMC     = 'https://pro-api.coinmarketcap.com';
+
+const cmcHeaders = () => ({
+  'X-CMC_PRO_API_KEY': CMC_KEY,
+  'Accept': 'application/json'
+});
+
+const requireCMC = (req, res, next) => {
+  if (!CMC_KEY) return res.status(503).json({ error: 'CMC_API_KEY não configurada.' });
+  next();
+};
+
+// ── CMC 1 — Listings: top N moedas por market cap
+// GET /api/cmc/listings?limit=20&convert=USD
+// ══════════════════════════════════════════════════
+app.get('/api/cmc/listings', requireCMC, async (req, res) => {
+  try {
+    const { limit = 20, convert = 'USD', sort = 'market_cap' } = req.query;
+    const { data } = await axios.get(`${CMC}/v1/cryptocurrency/listings/latest`, {
+      headers: cmcHeaders(),
+      params: { limit: Math.min(Number(limit), 100), convert, sort }
+    });
+    res.json(data);
+  } catch (err) {
+    res.status(err.response?.status || 500).json({ error: err.response?.data?.status?.error_message || err.message });
+  }
+});
+
+// ── CMC 2 — Quotes: preço/dados de símbolos específicos
+// GET /api/cmc/quotes?symbols=BTC,ETH,SOL
+// ══════════════════════════════════════════════════
+app.get('/api/cmc/quotes', requireCMC, async (req, res) => {
+  try {
+    const { symbols, ids, convert = 'USD' } = req.query;
+    if (!symbols && !ids) return res.status(400).json({ error: 'symbols ou ids obrigatório' });
+    const { data } = await axios.get(`${CMC}/v1/cryptocurrency/quotes/latest`, {
+      headers: cmcHeaders(),
+      params: { symbol: symbols, id: ids, convert }
+    });
+    res.json(data);
+  } catch (err) {
+    res.status(err.response?.status || 500).json({ error: err.response?.data?.status?.error_message || err.message });
+  }
+});
+
+// ── CMC 3 — Trending (mais buscadas agora)
+// GET /api/cmc/trending?limit=10
+// ══════════════════════════════════════════════════
+app.get('/api/cmc/trending', requireCMC, async (req, res) => {
+  try {
+    const { limit = 10 } = req.query;
+    const { data } = await axios.get(`${CMC}/v1/cryptocurrency/trending/latest`, {
+      headers: cmcHeaders(),
+      params: { limit: Math.min(Number(limit), 20), convert: 'USD' }
+    });
+    res.json(data);
+  } catch (err) {
+    res.status(err.response?.status || 500).json({ error: err.response?.data?.status?.error_message || err.message });
+  }
+});
+
+// ── CMC 4 — Global Metrics (market cap total, dominância, volume)
+// GET /api/cmc/global
+// ══════════════════════════════════════════════════
+app.get('/api/cmc/global', requireCMC, async (req, res) => {
+  try {
+    const { data } = await axios.get(`${CMC}/v1/global-metrics/quotes/latest`, {
+      headers: cmcHeaders(),
+      params: { convert: 'USD' }
+    });
+    res.json(data);
+  } catch (err) {
+    res.status(err.response?.status || 500).json({ error: err.response?.data?.status?.error_message || err.message });
+  }
+});
+
+// ── CMC 5 — Fear & Greed Index
+// GET /api/cmc/feargreed
+// ══════════════════════════════════════════════════
+app.get('/api/cmc/feargreed', requireCMC, async (req, res) => {
+  try {
+    const { data } = await axios.get(`${CMC}/v3/fear-and-greed/latest`, {
+      headers: cmcHeaders()
+    });
+    res.json(data);
+  } catch (err) {
+    res.status(err.response?.status || 500).json({ error: err.response?.data?.status?.error_message || err.message });
+  }
+});
+
+// ── CMC 6 — Metadata de uma moeda (logo, site, redes sociais)
+// GET /api/cmc/info?symbols=BTC,ETH
+// ══════════════════════════════════════════════════
+app.get('/api/cmc/info', requireCMC, async (req, res) => {
+  try {
+    const { symbols } = req.query;
+    if (!symbols) return res.status(400).json({ error: 'symbols obrigatório' });
+    const { data } = await axios.get(`${CMC}/v1/cryptocurrency/info`, {
+      headers: cmcHeaders(),
+      params: { symbol: symbols }
+    });
+    res.json(data);
+  } catch (err) {
+    res.status(err.response?.status || 500).json({ error: err.response?.data?.status?.error_message || err.message });
+  }
+});
+
+// ── CMC 7 — Gainers & Losers (trending por variação de preço)
+// GET /api/cmc/gainers?limit=10&percent_change_timeframe=24h
+// ══════════════════════════════════════════════════
+app.get('/api/cmc/gainers', requireCMC, async (req, res) => {
+  try {
+    const { limit = 10, percent_change_timeframe = '24h' } = req.query;
+    const { data } = await axios.get(`${CMC}/v1/cryptocurrency/trending/gainers-losers`, {
+      headers: cmcHeaders(),
+      params: { limit: Math.min(Number(limit), 20), percent_change_timeframe, convert: 'USD' }
+    });
+    res.json(data);
+  } catch (err) {
+    res.status(err.response?.status || 500).json({ error: err.response?.data?.status?.error_message || err.message });
+  }
+});
+
+// ══════════════════════════════════════════════════
 // ARKHAM INTELLIGENCE API
 // ══════════════════════════════════════════════════
 const ARKHAM_KEY = process.env.ARKHAM_API_KEY;
@@ -554,11 +681,12 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'ok',
     service: 'QUANT HUNTER Proxy',
-    version: '2.3',
+    version: '2.4',
     twitter: BEARER ? '✓' : '❌',
     claude: ANTHROPIC_KEY ? '✓' : '❌',
     binance: '✓',
     arkham: ARKHAM_KEY ? '✓' : '❌',
+    cmc: CMC_KEY ? '✓' : '❌',
     time: new Date().toISOString()
   });
 });
